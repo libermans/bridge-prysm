@@ -220,6 +220,7 @@ func NewService(ctx context.Context, opts ...Option) (*Service, error) {
 
 // Start the powchain service's main event loop.
 func (s *Service) Start() {
+	// RACEAI: We need the execution client to be connected to retrieve the latest block receipts
 	if err := s.setupExecutionClientConnections(s.ctx, s.cfg.currHttpEndpoint); err != nil {
 		log.WithError(err).Error("Could not connect to execution endpoint")
 	}

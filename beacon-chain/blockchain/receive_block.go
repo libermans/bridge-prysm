@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ethereum/go-ethereum/common"
+	gethTypes "github.com/ethereum/go-ethereum/core/types"
 	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed"
 	statefeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/state"
@@ -25,6 +27,7 @@ import (
 	"github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1/attestation"
 	"github.com/prysmaticlabs/prysm/v5/runtime/version"
 	"github.com/prysmaticlabs/prysm/v5/time/slots"
+	"github.com/sirupsen/logrus"
 	"go.opencensus.io/trace"
 	"golang.org/x/sync/errgroup"
 )
@@ -90,10 +93,11 @@ func (s *Service) ReceiveBlock(ctx context.Context, block interfaces.ReadOnlySig
 	currStoreFinalizedEpoch := s.FinalizedCheckpt().Epoch
 	currentEpoch := coreTime.CurrentEpoch(preState)
 
-	preStateVersion, preStateHeader, err := getStateVersionAndPayload(preState)
-	if err != nil {
-		return err
-	}
+	// RACEAI: Skipping ExecutionOnBlock validation
+	// preStateVersion, preStateHeader, err := getStateVersionAndPayload(preState)
+	// if err != nil {
+	// 	return err
+	// }
 	eg, _ := errgroup.WithContext(ctx)
 	var postState state.BeaconState
 	eg.Go(func() error {
@@ -106,10 +110,39 @@ func (s *Service) ReceiveBlock(ctx context.Context, block interfaces.ReadOnlySig
 	})
 	var isValidPayload bool
 	eg.Go(func() error {
-		var err error
-		isValidPayload, err = s.validateExecutionOnBlock(ctx, preStateVersion, preStateHeader, blockCopy, blockRoot)
-		if err != nil {
-			return errors.Wrap(err, "could not notify the engine of the new payload")
+		// RACEAI: Skipping ExecutionOnBlock validation
+		// var err error
+		// isValidPayload, err = s.validateExecutionOnBlock(ctx, preStateVersion, preStateHeader, blockCopy, blockRoot)
+		// if err != nil {
+		// 	return errors.Wrap(err, "could not notify the engine of the new payload")
+		// }
+		isValidPayload = true
+		log.WithFields(logrus.Fields{
+			"blockHeight": blockCopy.Block().Slot(),
+			"blockRoot":   fmt.Sprintf("%#x", blockRoot),
+		}).Info("Block validation temporarily skipped")
+
+		// Get execution payload if it exists
+		if isExecutionEnabled(blockCopy) {
+			payload, err := blockCopy.Block().Body().Execution()
+			if err != nil {
+				return errors.Wrap(err, "could not get execution payload")
+			}
+
+			// Get receipts from execution layer
+			var receipts []*gethTypes.Receipt
+			// RACEAI: TODO: Temporary skipping execution layer receipts request
+			receipts, err = s.cfg.ExecutionEngineCaller.GetBlockReceipts(ctx, common.BytesToHash(payload.BlockHash()))
+			if err != nil {
+				log.WithError(err).Debug("Could not get block receipts from execution client")
+				return nil // Non-critical error, continue processing
+			}
+
+			log.WithFields(logrus.Fields{
+				"blockHash":    fmt.Sprintf("%#x", payload.BlockHash()),
+				"receiptCount": len(receipts),
+				"slot":         blockCopy.Block().Slot(),
+			}).Debug("Retrieved block receipts from execution client")
 		}
 		return nil
 	})
@@ -496,4 +529,9 @@ func (s *Service) validateExecutionOnBlock(ctx context.Context, ver int, header 
 		}
 	}
 	return isValidPayload, nil
+}
+
+// Helper function to check if execution is enabled for the block
+func isExecutionEnabled(block interfaces.ReadOnlySignedBeaconBlock) bool {
+	return block.Version() >= version.Bellatrix
 }

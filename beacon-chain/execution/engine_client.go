@@ -11,6 +11,7 @@ import (
 	"github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/common/hexutil"
+	gethTypes "github.com/ethereum/go-ethereum/core/types"
 	gethRPC "github.com/ethereum/go-ethereum/rpc"
 	"github.com/holiman/uint256"
 	"github.com/pkg/errors"
@@ -40,6 +41,7 @@ var (
 		GetPayloadMethodV2,
 		GetPayloadBodiesByHashV1,
 		GetPayloadBodiesByRangeV1,
+		GetReceiptsMethod,
 	}
 )
 
@@ -72,6 +74,8 @@ const (
 	ExchangeCapabilities = "engine_exchangeCapabilities"
 	// Defines the seconds before timing out engine endpoints with non-block execution semantics.
 	defaultEngineTimeout = time.Second
+	// GetReceiptsMethod v1 request string for JSON-RPC.
+	GetReceiptsMethod = "eth_getBlockReceipts"
 )
 
 // ForkchoiceUpdatedResponse is the response kind received by the
@@ -104,6 +108,8 @@ type EngineCaller interface {
 	GetPayload(ctx context.Context, payloadId [8]byte, slot primitives.Slot) (interfaces.ExecutionData, *pb.BlobsBundle, bool, error)
 	ExecutionBlockByHash(ctx context.Context, hash common.Hash, withTxs bool) (*pb.ExecutionBlock, error)
 	GetTerminalBlockHash(ctx context.Context, transitionTime uint64) ([]byte, bool, error)
+	// TODO: Receipt class is missing in the proto file
+	GetBlockReceipts(ctx context.Context, blockHash common.Hash) ([]*gethTypes.Receipt, error)
 }
 
 var ErrEmptyBlockHash = errors.New("Block hash is empty 0x0000...")
@@ -1003,4 +1009,26 @@ func toBlockNumArg(number *big.Int) string {
 		return "safe"
 	}
 	return hexutil.EncodeBig(number)
+}
+
+// GetBlockReceipts implements the execution engine interface and returns receipts for a given block hash
+func (s *Service) GetBlockReceipts(ctx context.Context, blockHash common.Hash) ([]*gethTypes.Receipt, error) {
+	ctx, span := trace.StartSpan(ctx, "powchain.engine-api-client.GetBlockReceipts")
+	defer span.End()
+
+	var receipts []*gethTypes.Receipt
+	err := s.rpcClient.CallContext(ctx, &receipts, GetReceiptsMethod, blockHash.Hex()) // Convert hash to hex string
+	if err != nil {
+		return nil, handleRPCError(err)
+	}
+
+	if receipts == nil {
+		return nil, errors.New("got empty receipts from execution client")
+	}
+
+	log.WithFields(logrus.Fields{
+		"blockHash":    blockHash.Hex(),
+		"receiptCount": len(receipts),
+	}).Debug("Retrieved block receipts from execution client")
+	return receipts, nil
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/cache"
 	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/blocks"
@@ -62,89 +63,92 @@ func (s *Service) notifyForkchoiceUpdate(ctx context.Context, arg *fcuConfig) (*
 		log.WithError(err).Error("Could not get execution payload for head block")
 		return nil, nil
 	}
-	finalizedHash := s.cfg.ForkChoiceStore.FinalizedPayloadBlockHash()
-	justifiedHash := s.cfg.ForkChoiceStore.UnrealizedJustifiedPayloadBlockHash()
-	fcs := &enginev1.ForkchoiceState{
-		HeadBlockHash:      headPayload.BlockHash(),
-		SafeBlockHash:      justifiedHash[:],
-		FinalizedBlockHash: finalizedHash[:],
-	}
-	if arg.attributes == nil {
-		arg.attributes = payloadattribute.EmptyWithVersion(headBlk.Version())
-	}
-	payloadID, lastValidHash, err := s.cfg.ExecutionEngineCaller.ForkchoiceUpdated(ctx, fcs, arg.attributes)
-	if err != nil {
-		switch err {
-		case execution.ErrAcceptedSyncingPayloadStatus:
-			forkchoiceUpdatedOptimisticNodeCount.Inc()
-			log.WithFields(logrus.Fields{
-				"headSlot":                  headBlk.Slot(),
-				"headPayloadBlockHash":      fmt.Sprintf("%#x", bytesutil.Trunc(headPayload.BlockHash())),
-				"finalizedPayloadBlockHash": fmt.Sprintf("%#x", bytesutil.Trunc(finalizedHash[:])),
-			}).Info("Called fork choice updated with optimistic block")
-			return payloadID, nil
-		case execution.ErrInvalidPayloadStatus:
-			forkchoiceUpdatedInvalidNodeCount.Inc()
-			headRoot := arg.headRoot
-			if len(lastValidHash) == 0 {
-				lastValidHash = defaultLatestValidHash
-			}
-			invalidRoots, err := s.cfg.ForkChoiceStore.SetOptimisticToInvalid(ctx, headRoot, headBlk.ParentRoot(), bytesutil.ToBytes32(lastValidHash))
-			if err != nil {
-				log.WithError(err).Error("Could not set head root to invalid")
-				return nil, nil
-			}
-			if err := s.removeInvalidBlockAndState(ctx, invalidRoots); err != nil {
-				log.WithError(err).Error("Could not remove invalid block and state")
-				return nil, nil
-			}
+	// RACEAI: Skipping execution payload validation
+	// finalizedHash := s.cfg.ForkChoiceStore.FinalizedPayloadBlockHash()
+	// justifiedHash := s.cfg.ForkChoiceStore.UnrealizedJustifiedPayloadBlockHash()
+	// fcs := &enginev1.ForkchoiceState{
+	// 	HeadBlockHash:      headPayload.BlockHash(),
+	// 	SafeBlockHash:      justifiedHash[:],
+	// 	FinalizedBlockHash: finalizedHash[:],
+	// }
+	// if arg.attributes == nil {
+	// 	arg.attributes = payloadattribute.EmptyWithVersion(headBlk.Version())
+	// }
+	//
+	// payloadID, lastValidHash, err := s.cfg.ExecutionEngineCaller.ForkchoiceUpdated(ctx, fcs, arg.attributes)
+	var payloadID *enginev1.PayloadIDBytes = nil
+	// if err != nil {
+	// 	switch err {
+	// 	case execution.ErrAcceptedSyncingPayloadStatus:
+	// 		forkchoiceUpdatedOptimisticNodeCount.Inc()
+	// 		log.WithFields(logrus.Fields{
+	// 			"headSlot":                  headBlk.Slot(),
+	// 			"headPayloadBlockHash":      fmt.Sprintf("%#x", bytesutil.Trunc(headPayload.BlockHash())),
+	// 			"finalizedPayloadBlockHash": fmt.Sprintf("%#x", bytesutil.Trunc(finalizedHash[:])),
+	// 		}).Info("Called fork choice updated with optimistic block")
+	// 		return payloadID, nil
+	// 	case execution.ErrInvalidPayloadStatus:
+	// 		forkchoiceUpdatedInvalidNodeCount.Inc()
+	// 		headRoot := arg.headRoot
+	// 		if len(lastValidHash) == 0 {
+	// 			lastValidHash = defaultLatestValidHash
+	// 		}
+	// 		invalidRoots, err := s.cfg.ForkChoiceStore.SetOptimisticToInvalid(ctx, headRoot, headBlk.ParentRoot(), bytesutil.ToBytes32(lastValidHash))
+	// 		if err != nil {
+	// 			log.WithError(err).Error("Could not set head root to invalid")
+	// 			return nil, nil
+	// 		}
+	// 		if err := s.removeInvalidBlockAndState(ctx, invalidRoots); err != nil {
+	// 			log.WithError(err).Error("Could not remove invalid block and state")
+	// 			return nil, nil
+	// 		}
 
-			r, err := s.cfg.ForkChoiceStore.Head(ctx)
-			if err != nil {
-				log.WithFields(logrus.Fields{
-					"slot":                 headBlk.Slot(),
-					"blockRoot":            fmt.Sprintf("%#x", bytesutil.Trunc(headRoot[:])),
-					"invalidChildrenCount": len(invalidRoots),
-				}).Warn("Pruned invalid blocks, could not update head root")
-				return nil, invalidBlock{error: ErrInvalidPayload, root: arg.headRoot, invalidAncestorRoots: invalidRoots}
-			}
-			b, err := s.getBlock(ctx, r)
-			if err != nil {
-				log.WithError(err).Error("Could not get head block")
-				return nil, nil
-			}
-			st, err := s.cfg.StateGen.StateByRoot(ctx, r)
-			if err != nil {
-				log.WithError(err).Error("Could not get head state")
-				return nil, nil
-			}
-			pid, err := s.notifyForkchoiceUpdate(ctx, &fcuConfig{
-				headState:  st,
-				headRoot:   r,
-				headBlock:  b,
-				attributes: arg.attributes,
-			})
-			if err != nil {
-				return nil, err // Returning err because it's recursive here.
-			}
+	// 		r, err := s.cfg.ForkChoiceStore.Head(ctx)
+	// 		if err != nil {
+	// 			log.WithFields(logrus.Fields{
+	// 				"slot":                 headBlk.Slot(),
+	// 				"blockRoot":            fmt.Sprintf("%#x", bytesutil.Trunc(headRoot[:])),
+	// 				"invalidChildrenCount": len(invalidRoots),
+	// 			}).Warn("Pruned invalid blocks, could not update head root")
+	// 			return nil, invalidBlock{error: ErrInvalidPayload, root: arg.headRoot, invalidAncestorRoots: invalidRoots}
+	// 		}
+	// 		b, err := s.getBlock(ctx, r)
+	// 		if err != nil {
+	// 			log.WithError(err).Error("Could not get head block")
+	// 			return nil, nil
+	// 		}
+	// 		st, err := s.cfg.StateGen.StateByRoot(ctx, r)
+	// 		if err != nil {
+	// 			log.WithError(err).Error("Could not get head state")
+	// 			return nil, nil
+	// 		}
+	// 		pid, err := s.notifyForkchoiceUpdate(ctx, &fcuConfig{
+	// 			headState:  st,
+	// 			headRoot:   r,
+	// 			headBlock:  b,
+	// 			attributes: arg.attributes,
+	// 		})
+	// 		if err != nil {
+	// 			return nil, err // Returning err because it's recursive here.
+	// 		}
 
-			if err := s.saveHead(ctx, r, b, st); err != nil {
-				log.WithError(err).Error("could not save head after pruning invalid blocks")
-			}
+	// 		if err := s.saveHead(ctx, r, b, st); err != nil {
+	// 			log.WithError(err).Error("could not save head after pruning invalid blocks")
+	// 		}
 
-			log.WithFields(logrus.Fields{
-				"slot":                 headBlk.Slot(),
-				"blockRoot":            fmt.Sprintf("%#x", bytesutil.Trunc(headRoot[:])),
-				"invalidChildrenCount": len(invalidRoots),
-				"newHeadRoot":          fmt.Sprintf("%#x", bytesutil.Trunc(r[:])),
-			}).Warn("Pruned invalid blocks")
-			return pid, invalidBlock{error: ErrInvalidPayload, root: arg.headRoot, invalidAncestorRoots: invalidRoots}
+	// 		log.WithFields(logrus.Fields{
+	// 			"slot":                 headBlk.Slot(),
+	// 			"blockRoot":            fmt.Sprintf("%#x", bytesutil.Trunc(headRoot[:])),
+	// 			"invalidChildrenCount": len(invalidRoots),
+	// 			"newHeadRoot":          fmt.Sprintf("%#x", bytesutil.Trunc(r[:])),
+	// 		}).Warn("Pruned invalid blocks")
+	// 		return pid, invalidBlock{error: ErrInvalidPayload, root: arg.headRoot, invalidAncestorRoots: invalidRoots}
 
-		default:
-			log.WithError(err).Error(ErrUndefinedExecutionEngineError)
-			return nil, nil
-		}
-	}
+	// 	default:
+	// 		log.WithError(err).Error(ErrUndefinedExecutionEngineError)
+	// 		return nil, nil
+	// 	}
+	// }
 	forkchoiceUpdatedValidNodeCount.Inc()
 	if err := s.cfg.ForkChoiceStore.SetOptimisticToValid(ctx, arg.headRoot); err != nil {
 		log.WithError(err).Error("Could not set head root to valid")
@@ -152,17 +156,19 @@ func (s *Service) notifyForkchoiceUpdate(ctx context.Context, arg *fcuConfig) (*
 	}
 	// If the forkchoice update call has an attribute, update the payload ID cache.
 	hasAttr := arg.attributes != nil && !arg.attributes.IsEmpty()
-	nextSlot := s.CurrentSlot() + 1
-	if hasAttr && payloadID != nil {
-		var pId [8]byte
-		copy(pId[:], payloadID[:])
-		log.WithFields(logrus.Fields{
-			"blockRoot": fmt.Sprintf("%#x", bytesutil.Trunc(arg.headRoot[:])),
-			"headSlot":  headBlk.Slot(),
-			"payloadID": fmt.Sprintf("%#x", bytesutil.Trunc(payloadID[:])),
-		}).Info("Forkchoice updated with payload attributes for proposal")
-		s.cfg.PayloadIDCache.Set(nextSlot, arg.headRoot, pId)
-	} else if hasAttr && payloadID == nil && !features.Get().PrepareAllPayloads {
+	// RACEAI: Skipping payload ID cache update
+	// nextSlot := s.CurrentSlot() + 1
+	// if hasAttr && payloadID != nil {
+	// 	var pId [8]byte
+	// 	copy(pId[:], payloadID[:])
+	// 	log.WithFields(logrus.Fields{
+	// 		"blockRoot": fmt.Sprintf("%#x", bytesutil.Trunc(arg.headRoot[:])),
+	// 		"headSlot":  headBlk.Slot(),
+	// 		"payloadID": fmt.Sprintf("%#x", bytesutil.Trunc(payloadID[:])),
+	// 	}).Info("Forkchoice updated with payload attributes for proposal")
+	// 	s.cfg.PayloadIDCache.Set(nextSlot, arg.headRoot, pId)
+	// } else if hasAttr && payloadID == nil && !features.Get().PrepareAllPayloads {
+	if hasAttr && !features.Get().PrepareAllPayloads {
 		log.WithFields(logrus.Fields{
 			"blockHash": fmt.Sprintf("%#x", headPayload.BlockHash()),
 			"slot":      headBlk.Slot(),
@@ -412,4 +418,22 @@ func ConvertKzgCommitmentToVersionedHash(commitment []byte) common.Hash {
 	versionedHash := sha256.Sum256(commitment)
 	versionedHash[0] = blobCommitmentVersionKZG
 	return versionedHash
+}
+
+// getExecutionBlockReceipts retrieves receipts for an execution block
+func (s *Service) getExecutionBlockReceipts(ctx context.Context, payload interfaces.ExecutionData) ([]*types.Receipt, error) {
+	ctx, span := trace.StartSpan(ctx, "blockChain.getExecutionBlockReceipts")
+	defer span.End()
+
+	if payload == nil {
+		return nil, errors.New("nil execution payload")
+	}
+
+	blockHash := common.BytesToHash(payload.BlockHash())
+	receipts, err := s.cfg.ExecutionEngineCaller.GetBlockReceipts(ctx, blockHash)
+	if err != nil {
+		return nil, errors.Wrap(err, "could not get block receipts from execution engine")
+	}
+
+	return receipts, nil
 }

@@ -308,6 +308,14 @@ func validUnprocessed(ctx context.Context, bwb []blocks.BlockWithROBlobs, headSl
 
 func (s *Service) processBatchedBlocks(ctx context.Context, genesis time.Time,
 	bwb []blocks.BlockWithROBlobs, bFunc batchBlockReceiverFn) error {
+	// Start log
+	startTime := time.Now()
+	log.WithFields(logrus.Fields{
+		"batchSize": len(bwb),
+		"firstSlot": bwb[0].Block.Block().Slot(),
+		"lastSlot":  bwb[len(bwb)-1].Block.Block().Slot(),
+	}).Info("Starting batch block processing")
+
 	if len(bwb) == 0 {
 		return errors.New("0 blocks provided into method")
 	}
@@ -339,7 +347,18 @@ func (s *Service) processBatchedBlocks(ctx context.Context, genesis time.Time,
 		}
 	}
 
-	return bFunc(ctx, blocks.BlockWithROBlobsSlice(bwb).ROBlocks(), avs)
+	err = bFunc(ctx, blocks.BlockWithROBlobsSlice(bwb).ROBlocks(), avs)
+
+	// End log
+	log.WithFields(logrus.Fields{
+		"batchSize":      len(bwb),
+		"firstSlot":      bwb[0].Block.Block().Slot(),
+		"lastSlot":       bwb[len(bwb)-1].Block.Block().Slot(),
+		"processingTime": time.Since(startTime),
+		"error":          err != nil,
+	}).Info("Finished batch block processing")
+
+	return err
 }
 
 // updatePeerScorerStats adjusts monitored metrics for a peer.

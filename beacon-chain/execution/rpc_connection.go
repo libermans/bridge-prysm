@@ -53,6 +53,12 @@ func (s *Service) setupExecutionClientConnections(ctx context.Context, currEndpo
 // Every N seconds, defined as a backoffPeriod, attempts to re-establish an execution client
 // connection and if this does not work, we fallback to the next endpoint if defined.
 func (s *Service) pollConnectionStatus(ctx context.Context) {
+	// RACEAI: Temporarily skipping execution client connection polling
+	// TODO: We need to keep polling the execution client to retrieve the latest block receipts
+	return
+}
+
+func (s *Service) pollConnectionStatusREMOVED(ctx context.Context) {
 	// Use a custom logger to only log errors
 	logCounter := 0
 	errorLogger := func(err error, msg string) {
