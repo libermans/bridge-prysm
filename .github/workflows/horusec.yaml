@@ -1,9 +1,10 @@
 name: Horusec Security Scan
 
 on:
-  schedule:
-    # Runs cron at 16.00 UTC on
-    - cron: '0 0 * * SUN'
+  workflow_dispatch:
+  # schedule:
+  #   # Runs cron at 16.00 UTC on
+  #   - cron: '0 0 * * SUN'
 
 jobs:
   Horusec_Scan:
