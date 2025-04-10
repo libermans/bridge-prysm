@@ -525,15 +525,18 @@ func (s *Service) initPOWService() {
 			s.latestEth1Data.BlockTime = header.Time
 			s.latestEth1DataLock.Unlock()
 
-			if err := s.processPastLogs(ctx); err != nil {
-				err = errors.Wrap(err, "processPastLogs")
-				s.retryExecutionClientConnection(ctx, err)
-				errorLogger(
-					err,
-					"Unable to process past deposit contract logs, perhaps your execution client is not fully synced",
-				)
-				continue
-			}
+			log.Info("RACE: POWService - Skipping past logs")
+			/*
+				if err := s.processPastLogs(ctx); err != nil {
+					err = errors.Wrap(err, "processPastLogs")
+					s.retryExecutionClientConnection(ctx, err)
+					errorLogger(
+						err,
+						"Unable to process past deposit contract logs, perhaps your execution client is not fully synced",
+					)
+					continue
+				}
+			*/
 			// Cache eth1 headers from our voting period.
 			if err := s.cacheHeadersForEth1DataVote(ctx); err != nil {
 				err = errors.Wrap(err, "cacheHeadersForEth1DataVote")
@@ -579,6 +582,7 @@ func (s *Service) initPOWService() {
 func (s *Service) run(done <-chan struct{}) {
 	s.runError = nil
 
+	log.Info("RACE: Skipping POW service")
 	s.initPOWService()
 	// Do not keep storing the finalized state as it is
 	// no longer of use.
