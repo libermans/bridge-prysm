@@ -3,18 +3,19 @@ package testutil
 import (
 	"bytes"
 	"context"
+	"errors"
 	"time"
 
-	api "github.com/prysmaticlabs/prysm/v5/api/client"
-	"github.com/prysmaticlabs/prysm/v5/api/client/beacon"
-	"github.com/prysmaticlabs/prysm/v5/api/client/event"
-	fieldparams "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/proposer"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
-	"github.com/prysmaticlabs/prysm/v5/validator/client/iface"
-	"github.com/prysmaticlabs/prysm/v5/validator/keymanager"
+	api "github.com/OffchainLabs/prysm/v6/api/client"
+	"github.com/OffchainLabs/prysm/v6/api/client/beacon/health"
+	"github.com/OffchainLabs/prysm/v6/api/client/event"
+	fieldparams "github.com/OffchainLabs/prysm/v6/config/fieldparams"
+	"github.com/OffchainLabs/prysm/v6/config/proposer"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/primitives"
+	ethpb "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
+	prysmTime "github.com/OffchainLabs/prysm/v6/time"
+	"github.com/OffchainLabs/prysm/v6/validator/client/iface"
+	"github.com/OffchainLabs/prysm/v6/validator/keymanager"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -59,7 +60,9 @@ type FakeValidator struct {
 	ProposerSettingWait               time.Duration
 	Km                                keymanager.IKeymanager
 	graffiti                          string
-	Tracker                           *beacon.NodeHealthTracker
+	Tracker                           health.Tracker
+	AttSubmitted                      chan interface{}
+	BlockProposed                     chan interface{}
 }
 
 // Done for mocking.
@@ -73,7 +76,7 @@ func (fv *FakeValidator) WaitForKeymanagerInitialization(_ context.Context) erro
 	return nil
 }
 
-// LogSyncCommitteeMessagesSubmitted --
+// LogSubmittedSyncCommitteeMessages --
 func (fv *FakeValidator) LogSubmittedSyncCommitteeMessages() {}
 
 // WaitForChainStart for mocking.
@@ -134,9 +137,8 @@ func (fv *FakeValidator) NextSlot() <-chan primitives.Slot {
 }
 
 // UpdateDuties for mocking.
-func (fv *FakeValidator) UpdateDuties(_ context.Context, slot primitives.Slot) error {
+func (fv *FakeValidator) UpdateDuties(_ context.Context) error {
 	fv.UpdateDutiesCalled = true
-	fv.UpdateDutiesArg1 = uint64(slot)
 	return fv.UpdateDutiesRet
 }
 
@@ -170,12 +172,20 @@ func (fv *FakeValidator) RolesAt(_ context.Context, slot primitives.Slot) (map[[
 func (fv *FakeValidator) SubmitAttestation(_ context.Context, slot primitives.Slot, _ [fieldparams.BLSPubkeyLength]byte) {
 	fv.AttestToBlockHeadCalled = true
 	fv.AttestToBlockHeadArg1 = uint64(slot)
+	if fv.AttSubmitted != nil {
+		close(fv.AttSubmitted)
+		fv.AttSubmitted = nil
+	}
 }
 
 // ProposeBlock for mocking.
 func (fv *FakeValidator) ProposeBlock(_ context.Context, slot primitives.Slot, _ [fieldparams.BLSPubkeyLength]byte) {
 	fv.ProposeBlockCalled = true
 	fv.ProposeBlockArg1 = uint64(slot)
+	if fv.BlockProposed != nil {
+		close(fv.BlockProposed)
+		fv.BlockProposed = nil
+	}
 }
 
 // SubmitAggregateAndProof for mocking.
@@ -243,14 +253,11 @@ func (*FakeValidator) HasProposerSettings() bool {
 }
 
 // PushProposerSettings for mocking
-func (fv *FakeValidator) PushProposerSettings(ctx context.Context, km keymanager.IKeymanager, slot primitives.Slot, deadline time.Time) error {
-	nctx, cancel := context.WithDeadline(ctx, deadline)
-	ctx = nctx
-	defer cancel()
+func (fv *FakeValidator) PushProposerSettings(ctx context.Context, _ keymanager.IKeymanager, _ primitives.Slot, _ bool) error {
 	time.Sleep(fv.ProposerSettingWait)
-	if ctx.Err() == context.DeadlineExceeded {
+	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
 		log.Error("deadline exceeded")
-		// can't return error or it will trigger a log.fatal
+		// can't return error as it will trigger a log.fatal
 		return nil
 	}
 
@@ -268,8 +275,8 @@ func (*FakeValidator) SetPubKeyToValidatorIndexMap(_ context.Context, _ keymanag
 }
 
 // SignValidatorRegistrationRequest for mocking
-func (*FakeValidator) SignValidatorRegistrationRequest(_ context.Context, _ iface.SigningFunc, _ *ethpb.ValidatorRegistrationV1) (*ethpb.SignedValidatorRegistrationV1, error) {
-	return nil, nil
+func (*FakeValidator) SignValidatorRegistrationRequest(_ context.Context, _ iface.SigningFunc, _ *ethpb.ValidatorRegistrationV1) (*ethpb.SignedValidatorRegistrationV1, bool, error) {
+	return nil, false, nil
 }
 
 // ProposerSettings for mocking
@@ -283,20 +290,20 @@ func (fv *FakeValidator) SetProposerSettings(_ context.Context, settings *propos
 	return nil
 }
 
-// GetGraffiti for mocking
-func (f *FakeValidator) GetGraffiti(_ context.Context, _ [fieldparams.BLSPubkeyLength]byte) ([]byte, error) {
-	return []byte(f.graffiti), nil
+// Graffiti for mocking
+func (fv *FakeValidator) Graffiti(_ context.Context, _ [fieldparams.BLSPubkeyLength]byte) ([]byte, error) {
+	return []byte(fv.graffiti), nil
 }
 
 // SetGraffiti for mocking
-func (f *FakeValidator) SetGraffiti(_ context.Context, _ [fieldparams.BLSPubkeyLength]byte, graffiti []byte) error {
-	f.graffiti = string(graffiti)
+func (fv *FakeValidator) SetGraffiti(_ context.Context, _ [fieldparams.BLSPubkeyLength]byte, graffiti []byte) error {
+	fv.graffiti = string(graffiti)
 	return nil
 }
 
 // DeleteGraffiti for mocking
-func (f *FakeValidator) DeleteGraffiti(_ context.Context, _ [fieldparams.BLSPubkeyLength]byte) error {
-	f.graffiti = ""
+func (fv *FakeValidator) DeleteGraffiti(_ context.Context, _ [fieldparams.BLSPubkeyLength]byte) error {
+	fv.graffiti = ""
 	return nil
 }
 
@@ -304,12 +311,20 @@ func (*FakeValidator) StartEventStream(_ context.Context, _ []string, _ chan<- *
 
 }
 
-func (*FakeValidator) ProcessEvent(_ *event.Event) {}
+func (*FakeValidator) ProcessEvent(_ context.Context, _ *event.Event) {}
 
 func (*FakeValidator) EventStreamIsRunning() bool {
 	return true
 }
 
-func (fv *FakeValidator) HealthTracker() *beacon.NodeHealthTracker {
+func (fv *FakeValidator) HealthTracker() health.Tracker {
 	return fv.Tracker
+}
+
+func (*FakeValidator) Host() string {
+	return "127.0.0.1:0"
+}
+
+func (fv *FakeValidator) ChangeHost() {
+	fv.Host()
 }

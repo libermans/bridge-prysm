@@ -1,9 +1,11 @@
 package p2p
 
 import (
-	statefeed "github.com/prysmaticlabs/prysm/v5/beacon-chain/core/feed/state"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/db"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/startup"
+	"time"
+
+	statefeed "github.com/OffchainLabs/prysm/v6/beacon-chain/core/feed/state"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/db"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/startup"
 )
 
 // This is the default queue size used if we have specified an invalid one.
@@ -15,6 +17,7 @@ type Config struct {
 	NoDiscovery          bool
 	EnableUPnP           bool
 	StaticPeerID         bool
+	DisableLivenessCheck bool
 	StaticPeers          []string
 	Discv5BootStrapAddrs []string
 	RelayNodeAddr        string
@@ -24,8 +27,10 @@ type Config struct {
 	PrivateKey           string
 	DataDir              string
 	MetaDataDir          string
+	QUICPort             uint
 	TCPPort              uint
 	UDPPort              uint
+	PingInterval         time.Duration
 	MaxPeers             uint
 	QueueSize            uint
 	AllowListCIDR        string

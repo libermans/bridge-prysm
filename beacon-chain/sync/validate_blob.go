@@ -7,20 +7,20 @@ import (
 	"path"
 	"strings"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/verification"
+	"github.com/OffchainLabs/prysm/v6/config/features"
+	"github.com/OffchainLabs/prysm/v6/config/params"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/blocks"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/primitives"
+	"github.com/OffchainLabs/prysm/v6/crypto/rand"
+	"github.com/OffchainLabs/prysm/v6/encoding/bytesutil"
+	"github.com/OffchainLabs/prysm/v6/io/file"
+	eth "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
+	prysmTime "github.com/OffchainLabs/prysm/v6/time"
+	"github.com/OffchainLabs/prysm/v6/time/slots"
 	pubsub "github.com/libp2p/go-libp2p-pubsub"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/verification"
-	"github.com/prysmaticlabs/prysm/v5/config/features"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/primitives"
-	"github.com/prysmaticlabs/prysm/v5/crypto/rand"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-	"github.com/prysmaticlabs/prysm/v5/io/file"
-	eth "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	prysmTime "github.com/prysmaticlabs/prysm/v5/time"
-	"github.com/prysmaticlabs/prysm/v5/time/slots"
 	"github.com/sirupsen/logrus"
 )
 
@@ -51,14 +51,14 @@ func (s *Service) validateBlob(ctx context.Context, pid peer.ID, msg *pubsub.Mes
 	if err != nil {
 		return pubsub.ValidationReject, errors.Wrap(err, "roblob conversion failure")
 	}
-	vf := s.newBlobVerifier(blob, verification.GossipSidecarRequirements)
+	vf := s.newBlobVerifier(blob, verification.GossipBlobSidecarRequirements)
 
 	if err := vf.BlobIndexInBounds(); err != nil {
 		return pubsub.ValidationReject, err
 	}
 
 	// [REJECT] The sidecar is for the correct subnet -- i.e. compute_subnet_for_blob_sidecar(sidecar.index) == subnet_id.
-	want := fmt.Sprintf("blob_sidecar_%d", computeSubnetForBlobSidecar(blob.Index))
+	want := fmt.Sprintf("blob_sidecar_%d", computeSubnetForBlobSidecar(blob.Index, blob.Slot()))
 	if !strings.Contains(*msg.Topic, want) {
 		log.WithFields(blobFields(blob)).Debug("Sidecar index does not match topic")
 		return pubsub.ValidationReject, fmt.Errorf("wrong topic name: %s", *msg.Topic)
@@ -92,11 +92,11 @@ func (s *Service) validateBlob(ctx context.Context, pid peer.ID, msg *pubsub.Mes
 		return pubsub.ValidationIgnore, err
 	}
 
-	if err := vf.ValidProposerSignature(ctx); err != nil {
+	if err := vf.SidecarParentValid(s.hasBadBlock); err != nil {
 		return pubsub.ValidationReject, err
 	}
 
-	if err := vf.SidecarParentValid(s.hasBadBlock); err != nil {
+	if err := vf.ValidProposerSignature(ctx); err != nil {
 		return pubsub.ValidationReject, err
 	}
 
@@ -169,8 +169,12 @@ func blobFields(b blocks.ROBlob) logrus.Fields {
 	}
 }
 
-func computeSubnetForBlobSidecar(index uint64) uint64 {
-	return index % params.BeaconConfig().BlobsidecarSubnetCount
+func computeSubnetForBlobSidecar(index uint64, slot primitives.Slot) uint64 {
+	subnetCount := params.BeaconConfig().BlobsidecarSubnetCount
+	if slots.ToEpoch(slot) >= params.BeaconConfig().ElectraForkEpoch {
+		subnetCount = params.BeaconConfig().BlobsidecarSubnetCountElectra
+	}
+	return index % subnetCount
 }
 
 // saveInvalidBlobToTemp as a block ssz. Writes to temp directory.

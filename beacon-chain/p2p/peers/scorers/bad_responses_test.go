@@ -5,13 +5,13 @@ import (
 	"sort"
 	"testing"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/peers"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/peers/peerdata"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/p2p/peers/scorers"
+	"github.com/OffchainLabs/prysm/v6/testing/assert"
+	"github.com/OffchainLabs/prysm/v6/testing/require"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/peers"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/peers/peerdata"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/p2p/peers/scorers"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
 )
 
 func TestScorers_BadResponses_Score(t *testing.T) {
@@ -33,19 +33,19 @@ func TestScorers_BadResponses_Score(t *testing.T) {
 	assert.Equal(t, 0., scorer.Score(pid), "Unexpected score for unregistered peer")
 
 	scorer.Increment(pid)
-	assert.Equal(t, false, scorer.IsBadPeer(pid))
+	assert.NoError(t, scorer.IsBadPeer(pid))
 	assert.Equal(t, -2.5, scorer.Score(pid))
 
 	scorer.Increment(pid)
-	assert.Equal(t, false, scorer.IsBadPeer(pid))
+	assert.NoError(t, scorer.IsBadPeer(pid))
 	assert.Equal(t, float64(-5), scorer.Score(pid))
 
 	scorer.Increment(pid)
-	assert.Equal(t, false, scorer.IsBadPeer(pid))
+	assert.NoError(t, scorer.IsBadPeer(pid))
 	assert.Equal(t, float64(-7.5), scorer.Score(pid))
 
 	scorer.Increment(pid)
-	assert.Equal(t, true, scorer.IsBadPeer(pid))
+	assert.NotNil(t, scorer.IsBadPeer(pid))
 	assert.Equal(t, -100.0, scorer.Score(pid))
 }
 
@@ -152,17 +152,17 @@ func TestScorers_BadResponses_IsBadPeer(t *testing.T) {
 	})
 	scorer := peerStatuses.Scorers().BadResponsesScorer()
 	pid := peer.ID("peer1")
-	assert.Equal(t, false, scorer.IsBadPeer(pid))
+	assert.NoError(t, scorer.IsBadPeer(pid))
 
 	peerStatuses.Add(nil, pid, nil, network.DirUnknown)
-	assert.Equal(t, false, scorer.IsBadPeer(pid))
+	assert.NoError(t, scorer.IsBadPeer(pid))
 
 	for i := 0; i < scorers.DefaultBadResponsesThreshold; i++ {
 		scorer.Increment(pid)
 		if i == scorers.DefaultBadResponsesThreshold-1 {
-			assert.Equal(t, true, scorer.IsBadPeer(pid), "Unexpected peer status")
+			assert.NotNil(t, scorer.IsBadPeer(pid), "Unexpected peer status")
 		} else {
-			assert.Equal(t, false, scorer.IsBadPeer(pid), "Unexpected peer status")
+			assert.NoError(t, scorer.IsBadPeer(pid), "Unexpected peer status")
 		}
 	}
 }
@@ -185,11 +185,11 @@ func TestScorers_BadResponses_BadPeers(t *testing.T) {
 		scorer.Increment(pids[2])
 		scorer.Increment(pids[4])
 	}
-	assert.Equal(t, false, scorer.IsBadPeer(pids[0]), "Invalid peer status")
-	assert.Equal(t, true, scorer.IsBadPeer(pids[1]), "Invalid peer status")
-	assert.Equal(t, true, scorer.IsBadPeer(pids[2]), "Invalid peer status")
-	assert.Equal(t, false, scorer.IsBadPeer(pids[3]), "Invalid peer status")
-	assert.Equal(t, true, scorer.IsBadPeer(pids[4]), "Invalid peer status")
+	assert.NoError(t, scorer.IsBadPeer(pids[0]), "Invalid peer status")
+	assert.NotNil(t, scorer.IsBadPeer(pids[1]), "Invalid peer status")
+	assert.NotNil(t, scorer.IsBadPeer(pids[2]), "Invalid peer status")
+	assert.NoError(t, scorer.IsBadPeer(pids[3]), "Invalid peer status")
+	assert.NotNil(t, scorer.IsBadPeer(pids[4]), "Invalid peer status")
 	want := []peer.ID{pids[1], pids[2], pids[4]}
 	badPeers := scorer.BadPeers()
 	sort.Slice(badPeers, func(i, j int) bool {

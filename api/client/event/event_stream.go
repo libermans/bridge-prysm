@@ -7,9 +7,9 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/OffchainLabs/prysm/v6/api"
+	"github.com/OffchainLabs/prysm/v6/api/client"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/api"
-	"github.com/prysmaticlabs/prysm/v5/api/client"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -93,6 +93,7 @@ func (h *EventStream) Subscribe(eventsChannel chan<- *Event) {
 			EventType: EventConnectionError,
 			Data:      []byte(errors.Wrap(err, client.ErrConnectionIssue.Error()).Error()),
 		}
+		return
 	}
 
 	defer func() {
@@ -102,6 +103,8 @@ func (h *EventStream) Subscribe(eventsChannel chan<- *Event) {
 	}()
 	// Create a new scanner to read lines from the response body
 	scanner := bufio.NewScanner(resp.Body)
+	// Set the split function for the scanning operation
+	scanner.Split(scanLinesWithCarriage)
 
 	var eventType, data string // Variables to store event type and data
 
@@ -113,7 +116,7 @@ func (h *EventStream) Subscribe(eventsChannel chan<- *Event) {
 			close(eventsChannel)
 			return
 		default:
-			line := scanner.Text() // TODO(13730): scanner does not handle /r and does not fully adhere to https://html.spec.whatwg.org/multipage/server-sent-events.html#the-eventsource-interface
+			line := scanner.Text()
 			// Handle the event based on your specific format
 			if line == "" {
 				// Empty line indicates the end of an event

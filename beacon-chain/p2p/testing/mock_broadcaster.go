@@ -5,7 +5,8 @@ import (
 	"sync"
 	"sync/atomic"
 
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/interfaces"
+	ethpb "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -13,7 +14,7 @@ import (
 type MockBroadcaster struct {
 	BroadcastCalled       atomic.Bool
 	BroadcastMessages     []proto.Message
-	BroadcastAttestations []*ethpb.Attestation
+	BroadcastAttestations []ethpb.Att
 	msgLock               sync.Mutex
 	attLock               sync.Mutex
 }
@@ -28,7 +29,7 @@ func (m *MockBroadcaster) Broadcast(_ context.Context, msg proto.Message) error 
 }
 
 // BroadcastAttestation records a broadcast occurred.
-func (m *MockBroadcaster) BroadcastAttestation(_ context.Context, _ uint64, a *ethpb.Attestation) error {
+func (m *MockBroadcaster) BroadcastAttestation(_ context.Context, _ uint64, a ethpb.Att) error {
 	m.BroadcastCalled.Store(true)
 	m.attLock.Lock()
 	defer m.attLock.Unlock()
@@ -44,6 +45,18 @@ func (m *MockBroadcaster) BroadcastSyncCommitteeMessage(_ context.Context, _ uin
 
 // BroadcastBlob broadcasts a blob for mock.
 func (m *MockBroadcaster) BroadcastBlob(context.Context, uint64, *ethpb.BlobSidecar) error {
+	m.BroadcastCalled.Store(true)
+	return nil
+}
+
+// BroadcastLightClientOptimisticUpdate records a broadcast occurred.
+func (m *MockBroadcaster) BroadcastLightClientOptimisticUpdate(_ context.Context, _ interfaces.LightClientOptimisticUpdate) error {
+	m.BroadcastCalled.Store(true)
+	return nil
+}
+
+// BroadcastLightClientFinalityUpdate records a broadcast occurred.
+func (m *MockBroadcaster) BroadcastLightClientFinalityUpdate(_ context.Context, _ interfaces.LightClientFinalityUpdate) error {
 	m.BroadcastCalled.Store(true)
 	return nil
 }

@@ -1,18 +1,18 @@
 package blocks
 
 import (
+	field_params "github.com/OffchainLabs/prysm/v6/config/fieldparams"
+	"github.com/OffchainLabs/prysm/v6/config/params"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/interfaces"
+	"github.com/OffchainLabs/prysm/v6/container/trie"
+	"github.com/OffchainLabs/prysm/v6/encoding/ssz"
+	"github.com/OffchainLabs/prysm/v6/runtime/version"
 	"github.com/pkg/errors"
 	"github.com/prysmaticlabs/gohashtree"
-	field_params "github.com/prysmaticlabs/prysm/v5/config/fieldparams"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
-	"github.com/prysmaticlabs/prysm/v5/container/trie"
-	"github.com/prysmaticlabs/prysm/v5/encoding/ssz"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
 )
 
 const (
-	bodyLength    = 12 // The number of elements in the BeaconBlockBody Container
+	bodyLength    = 13 // The number of elements in the BeaconBlockBody Container for Electra
 	logBodyLength = 4  // The log 2 of bodyLength
 	kzgPosition   = 11 // The index of the KZG commitment list in the Body
 	kzgRootIndex  = 54 // The Merkle index of the KZG commitment list's root in the Body's Merkle tree
@@ -80,8 +80,38 @@ func MerkleProofKZGCommitment(body interfaces.ReadOnlyBeaconBlockBody, index int
 	return proof, nil
 }
 
-// leavesFromCommitments hashes each commitment to construct a slice of roots
-func leavesFromCommitments(commitments [][]byte) [][]byte {
+// MerkleProofKZGCommitments constructs a Merkle proof of inclusion of the KZG
+// commitments into the Beacon Block with the given `body`
+func MerkleProofKZGCommitments(body interfaces.ReadOnlyBeaconBlockBody) ([][]byte, error) {
+	bodyVersion := body.Version()
+	if bodyVersion < version.Deneb {
+		return nil, errUnsupportedBeaconBlockBody
+	}
+
+	membersRoots, err := topLevelRoots(body)
+	if err != nil {
+		return nil, errors.Wrap(err, "top level roots")
+	}
+
+	sparse, err := trie.GenerateTrieFromItems(membersRoots, logBodyLength)
+	if err != nil {
+		return nil, errors.Wrap(err, "generate trie from items")
+	}
+
+	proof, err := sparse.MerkleProof(kzgPosition)
+	if err != nil {
+		return nil, errors.Wrap(err, "merkle proof")
+	}
+
+	// Remove the last element as it is a mix in with the number of
+	// elements in the trie.
+	proof = proof[:len(proof)-1]
+
+	return proof, nil
+}
+
+// LeavesFromCommitments hashes each commitment to construct a slice of roots
+func LeavesFromCommitments(commitments [][]byte) [][]byte {
 	leaves := make([][]byte, len(commitments))
 	for i, kzg := range commitments {
 		chunk := makeChunk(kzg)
@@ -105,7 +135,7 @@ func bodyProof(commitments [][]byte, index int) ([][]byte, error) {
 	if index < 0 || index >= len(commitments) {
 		return nil, errInvalidIndex
 	}
-	leaves := leavesFromCommitments(commitments)
+	leaves := LeavesFromCommitments(commitments)
 	sparse, err := trie.GenerateTrieFromItems(leaves, field_params.LogMaxBlobCommitments)
 	if err != nil {
 		return nil, err
@@ -156,7 +186,12 @@ func topLevelRoots(body interfaces.ReadOnlyBeaconBlockBody) ([][]byte, error) {
 
 	// Attester slashings
 	as := body.AttesterSlashings()
-	root, err = ssz.MerkleizeListSSZ(as, params.BeaconConfig().MaxAttesterSlashings)
+	bodyVersion := body.Version()
+	if bodyVersion < version.Electra {
+		root, err = ssz.MerkleizeListSSZ(as, params.BeaconConfig().MaxAttesterSlashings)
+	} else {
+		root, err = ssz.MerkleizeListSSZ(as, params.BeaconConfig().MaxAttesterSlashingsElectra)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -164,7 +199,11 @@ func topLevelRoots(body interfaces.ReadOnlyBeaconBlockBody) ([][]byte, error) {
 
 	// Attestations
 	att := body.Attestations()
-	root, err = ssz.MerkleizeListSSZ(att, params.BeaconConfig().MaxAttestations)
+	if bodyVersion < version.Electra {
+		root, err = ssz.MerkleizeListSSZ(att, params.BeaconConfig().MaxAttestations)
+	} else {
+		root, err = ssz.MerkleizeListSSZ(att, params.BeaconConfig().MaxAttestationsElectra)
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -220,5 +259,18 @@ func topLevelRoots(body interfaces.ReadOnlyBeaconBlockBody) ([][]byte, error) {
 	copy(layer[10], root[:])
 
 	// KZG commitments is not needed
+
+	// Execution requests
+	if body.Version() >= version.Electra {
+		er, err := body.ExecutionRequests()
+		if err != nil {
+			return nil, err
+		}
+		root, err = er.HashTreeRoot()
+		if err != nil {
+			return nil, err
+		}
+		copy(layer[12], root[:])
+	}
 	return layer, nil
 }

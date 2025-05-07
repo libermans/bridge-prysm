@@ -3,19 +3,9 @@ package verification
 import (
 	"context"
 
-	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/blockchain/kzg"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/blocks"
-	"github.com/prysmaticlabs/prysm/v5/encoding/bytesutil"
-)
-
-var (
-	// ErrBatchSignatureMismatch is returned by VerifiedROBlobs when any of the blobs in the batch have a signature
-	// which does not match the signature for the block with a corresponding root.
-	ErrBatchSignatureMismatch = errors.New("Sidecar block header signature does not match signed block")
-	// ErrBatchBlockRootMismatch is returned by VerifiedROBlobs in the scenario where the root of the given signed block
-	// does not match the block header in one of the corresponding sidecars.
-	ErrBatchBlockRootMismatch = errors.New("Sidecar block header root does not match signed block")
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/blockchain/kzg"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/blocks"
+	"github.com/OffchainLabs/prysm/v6/encoding/bytesutil"
 )
 
 // NewBlobBatchVerifier initializes a blob batch verifier. It requires the caller to correctly specify
@@ -46,10 +36,12 @@ func (batch *BlobBatchVerifier) VerifiedROBlobs(ctx context.Context, blk blocks.
 	if len(scs) == 0 {
 		return nil, nil
 	}
+	blkSig := blk.Signature()
 	// We assume the proposer is validated wrt the block in batch block processing before performing the DA check.
 	// So at this stage we just need to make sure the value being signed and signature bytes match the block.
 	for i := range scs {
-		if blk.Signature() != bytesutil.ToBytes96(scs[i].SignedBlockHeader.Signature) {
+		blobSig := bytesutil.ToBytes96(scs[i].SignedBlockHeader.Signature)
+		if blkSig != blobSig {
 			return nil, ErrBatchSignatureMismatch
 		}
 		// Extra defensive check to make sure the roots match. This should be unnecessary in practice since the root from

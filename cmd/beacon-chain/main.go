@@ -7,34 +7,35 @@ import (
 	"os"
 	"path/filepath"
 	runtimeDebug "runtime/debug"
+	"time"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/builder"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/node"
+	"github.com/OffchainLabs/prysm/v6/cmd"
+	blockchaincmd "github.com/OffchainLabs/prysm/v6/cmd/beacon-chain/blockchain"
+	dbcommands "github.com/OffchainLabs/prysm/v6/cmd/beacon-chain/db"
+	"github.com/OffchainLabs/prysm/v6/cmd/beacon-chain/execution"
+	"github.com/OffchainLabs/prysm/v6/cmd/beacon-chain/flags"
+	jwtcommands "github.com/OffchainLabs/prysm/v6/cmd/beacon-chain/jwt"
+	"github.com/OffchainLabs/prysm/v6/cmd/beacon-chain/storage"
+	backfill "github.com/OffchainLabs/prysm/v6/cmd/beacon-chain/sync/backfill"
+	bflags "github.com/OffchainLabs/prysm/v6/cmd/beacon-chain/sync/backfill/flags"
+	"github.com/OffchainLabs/prysm/v6/cmd/beacon-chain/sync/checkpoint"
+	"github.com/OffchainLabs/prysm/v6/cmd/beacon-chain/sync/genesis"
+	"github.com/OffchainLabs/prysm/v6/config/features"
+	"github.com/OffchainLabs/prysm/v6/io/file"
+	"github.com/OffchainLabs/prysm/v6/io/logs"
+	"github.com/OffchainLabs/prysm/v6/monitoring/journald"
+	"github.com/OffchainLabs/prysm/v6/runtime/debug"
+	"github.com/OffchainLabs/prysm/v6/runtime/fdlimits"
+	prefixed "github.com/OffchainLabs/prysm/v6/runtime/logging/logrus-prefixed-formatter"
+	_ "github.com/OffchainLabs/prysm/v6/runtime/maxprocs"
+	"github.com/OffchainLabs/prysm/v6/runtime/tos"
+	"github.com/OffchainLabs/prysm/v6/runtime/version"
 	gethlog "github.com/ethereum/go-ethereum/log"
 	golog "github.com/ipfs/go-log/v2"
 	joonix "github.com/joonix/log"
 	"github.com/pkg/errors"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/builder"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/node"
-	"github.com/prysmaticlabs/prysm/v5/cmd"
-	blockchaincmd "github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/blockchain"
-	dbcommands "github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/db"
-	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/execution"
-	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/flags"
-	jwtcommands "github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/jwt"
-	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/storage"
-	backfill "github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/sync/backfill"
-	bflags "github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/sync/backfill/flags"
-	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/sync/checkpoint"
-	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/sync/genesis"
-	"github.com/prysmaticlabs/prysm/v5/config/features"
-	"github.com/prysmaticlabs/prysm/v5/io/file"
-	"github.com/prysmaticlabs/prysm/v5/io/logs"
-	"github.com/prysmaticlabs/prysm/v5/monitoring/journald"
-	"github.com/prysmaticlabs/prysm/v5/runtime/debug"
-	"github.com/prysmaticlabs/prysm/v5/runtime/fdlimits"
-	prefixed "github.com/prysmaticlabs/prysm/v5/runtime/logging/logrus-prefixed-formatter"
-	_ "github.com/prysmaticlabs/prysm/v5/runtime/maxprocs"
-	"github.com/prysmaticlabs/prysm/v5/runtime/tos"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
 	"github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 )
@@ -49,10 +50,9 @@ var appFlags = []cli.Flag{
 	flags.CertFlag,
 	flags.KeyFlag,
 	flags.HTTPModules,
-	flags.DisableGRPCGateway,
-	flags.GRPCGatewayHost,
-	flags.GRPCGatewayPort,
-	flags.GPRCGatewayCorsDomain,
+	flags.HTTPServerHost,
+	flags.HTTPServerPort,
+	flags.HTTPServerCorsDomain,
 	flags.MinSyncPeers,
 	flags.ContractDeploymentBlock,
 	flags.SetGCPercent,
@@ -61,10 +61,8 @@ var appFlags = []cli.Flag{
 	flags.BlobBatchLimit,
 	flags.BlobBatchLimitBurstFactor,
 	flags.InteropMockEth1DataVotesFlag,
-	flags.InteropNumValidatorsFlag,
-	flags.InteropGenesisTimeFlag,
 	flags.SlotsPerArchivedPoint,
-	flags.EnableDebugRPCEndpoints,
+	flags.DisableDebugRPCEndpoints,
 	flags.SubscribeToAllSubnets,
 	flags.HistoricalSlasherNode,
 	flags.ChainID,
@@ -72,6 +70,7 @@ var appFlags = []cli.Flag{
 	flags.WeakSubjectivityCheckpoint,
 	flags.Eth1HeaderReqLimit,
 	flags.MinPeersPerSubnet,
+	flags.MaxConcurrentDials,
 	flags.SuggestedFeeRecipient,
 	flags.TerminalTotalDifficultyOverride,
 	flags.TerminalBlockHashOverride,
@@ -81,7 +80,11 @@ var appFlags = []cli.Flag{
 	flags.MaxBuilderConsecutiveMissedSlots,
 	flags.EngineEndpointTimeoutSeconds,
 	flags.LocalBlockValueBoost,
-	cmd.BackupWebhookOutputDir,
+	flags.MinBuilderBid,
+	flags.MinBuilderDiff,
+	flags.BeaconDBPruning,
+	flags.PrunerRetentionEpochs,
+	flags.EnableBuilderSSZ,
 	cmd.MinimalConfigFlag,
 	cmd.E2EConfigFlag,
 	cmd.RPCMaxPageSizeFlag,
@@ -90,6 +93,7 @@ var appFlags = []cli.Flag{
 	cmd.StaticPeers,
 	cmd.RelayNode,
 	cmd.P2PUDPPort,
+	cmd.P2PQUICPort,
 	cmd.P2PTCPPort,
 	cmd.P2PIP,
 	cmd.P2PHost,
@@ -118,8 +122,6 @@ var appFlags = []cli.Flag{
 	debug.PProfAddrFlag,
 	debug.PProfPortFlag,
 	debug.MemProfileRateFlag,
-	debug.CPUProfileFlag,
-	debug.TraceFlag,
 	debug.BlockProfileRateFlag,
 	debug.MutexProfileFractionFlag,
 	cmd.LogFileName,
@@ -138,9 +140,11 @@ var appFlags = []cli.Flag{
 	genesis.StatePath,
 	genesis.BeaconAPIURL,
 	flags.SlasherDirFlag,
+	flags.SlasherFlag,
 	flags.JwtId,
 	storage.BlobStoragePathFlag,
 	storage.BlobRetentionEpochFlag,
+	storage.BlobStorageLayout,
 	bflags.EnableExperimentalBackfill,
 	bflags.BackfillBatchSize,
 	bflags.BackfillWorkerCount,
@@ -162,7 +166,7 @@ func before(ctx *cli.Context) error {
 	switch format {
 	case "text":
 		formatter := new(prefixed.TextFormatter)
-		formatter.TimestampFormat = "2006-01-02 15:04:05"
+		formatter.TimestampFormat = time.DateTime
 		formatter.FullTimestamp = true
 
 		// If persistent log files are written - we disable the log messages coloring because
@@ -173,7 +177,7 @@ func before(ctx *cli.Context) error {
 		f := joonix.NewFormatter()
 
 		if err := joonix.DisableTimestampFormat(f); err != nil {
-			panic(err)
+			panic(err) // lint:nopanic -- This shouldn't happen, but crashing immediately at startup is OK.
 		}
 
 		logrus.SetFormatter(f)
@@ -210,6 +214,10 @@ func before(ctx *cli.Context) error {
 		return errors.Wrap(err, "failed to set max fd limits")
 	}
 
+	if err := features.ValidateNetworkFlags(ctx); err != nil {
+		return errors.Wrap(err, "provided multiple network flags")
+	}
+
 	return cmd.ValidateNoArgs(ctx)
 }
 
@@ -239,7 +247,7 @@ func main() {
 	defer func() {
 		if x := recover(); x != nil {
 			log.Errorf("Runtime panic: %v\n%v", x, string(runtimeDebug.Stack()))
-			panic(x)
+			panic(x) // lint:nopanic -- This is just resurfacing the original panic.
 		}
 	}()
 
@@ -278,9 +286,7 @@ func startNode(ctx *cli.Context, cancel context.CancelFunc) error {
 		// libp2p specific logging.
 		golog.SetAllLoggers(golog.LevelDebug)
 		// Geth specific logging.
-		glogger := gethlog.NewGlogHandler(gethlog.StreamHandler(os.Stderr, gethlog.TerminalFormat(true)))
-		glogger.Verbosity(gethlog.LvlTrace)
-		gethlog.Root().SetHandler(glogger)
+		gethlog.SetDefault(gethlog.NewLogger(gethlog.NewTerminalHandlerWithLevel(os.Stderr, gethlog.LvlTrace, true)))
 	}
 
 	blockchainFlagOpts, err := blockchaincmd.FlagOptions(ctx)

@@ -9,16 +9,16 @@ import (
 	"testing"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/cache"
+	"github.com/OffchainLabs/prysm/v6/cmd/beacon-chain/flags"
+	"github.com/OffchainLabs/prysm/v6/config/params"
+	ecdsaprysm "github.com/OffchainLabs/prysm/v6/crypto/ecdsa"
+	"github.com/OffchainLabs/prysm/v6/testing/assert"
+	"github.com/OffchainLabs/prysm/v6/testing/require"
 	"github.com/ethereum/go-ethereum/p2p/enode"
 	"github.com/ethereum/go-ethereum/p2p/enr"
 	"github.com/libp2p/go-libp2p/core/crypto"
 	"github.com/prysmaticlabs/go-bitfield"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/cache"
-	"github.com/prysmaticlabs/prysm/v5/cmd/beacon-chain/flags"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	ecdsaprysm "github.com/prysmaticlabs/prysm/v5/crypto/ecdsa"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
 )
 
 func TestStartDiscV5_FindPeersWithSubnet(t *testing.T) {
@@ -66,7 +66,7 @@ func TestStartDiscV5_FindPeersWithSubnet(t *testing.T) {
 	genesisTime := time.Now()
 
 	bootNodeService := &Service{
-		cfg:                   &Config{TCPPort: 2000, UDPPort: 3000},
+		cfg:                   &Config{UDPPort: 2000, TCPPort: 3000, QUICPort: 3000, DisableLivenessCheck: true, PingInterval: testPingInterval},
 		genesisTime:           genesisTime,
 		genesisValidatorsRoot: genesisValidatorsRoot,
 	}
@@ -78,10 +78,14 @@ func TestStartDiscV5_FindPeersWithSubnet(t *testing.T) {
 	require.NoError(t, err)
 	defer bootListener.Close()
 
+	// Allow bootnode's table to have its initial refresh. This allows
+	// inbound nodes to be added in.
+	time.Sleep(5 * time.Second)
+
 	bootNodeENR := bootListener.Self().String()
 
 	// Create 3 nodes, each subscribed to a different subnet.
-	// Each node is connected to the boostrap node.
+	// Each node is connected to the bootstrap node.
 	services := make([]*Service, 0, 3)
 
 	for i := 1; i <= 3; i++ {
@@ -89,8 +93,11 @@ func TestStartDiscV5_FindPeersWithSubnet(t *testing.T) {
 		service, err := NewService(ctx, &Config{
 			Discv5BootStrapAddrs: []string{bootNodeENR},
 			MaxPeers:             30,
-			TCPPort:              uint(2000 + i),
-			UDPPort:              uint(3000 + i),
+			UDPPort:              uint(2000 + i),
+			TCPPort:              uint(3000 + i),
+			QUICPort:             uint(3000 + i),
+			PingInterval:         testPingInterval,
+			DisableLivenessCheck: true,
 		})
 
 		require.NoError(t, err)
@@ -132,9 +139,12 @@ func TestStartDiscV5_FindPeersWithSubnet(t *testing.T) {
 
 	cfg := &Config{
 		Discv5BootStrapAddrs: []string{bootNodeENR},
+		PingInterval:         testPingInterval,
+		DisableLivenessCheck: true,
 		MaxPeers:             30,
-		TCPPort:              2010,
-		UDPPort:              3010,
+		UDPPort:              2010,
+		TCPPort:              3010,
+		QUICPort:             3010,
 	}
 
 	service, err := NewService(ctx, cfg)

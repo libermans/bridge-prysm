@@ -6,12 +6,12 @@ import (
 	"net/http"
 	"testing"
 
+	"github.com/OffchainLabs/prysm/v6/api/server/structs"
+	"github.com/OffchainLabs/prysm/v6/network/httputil"
+	"github.com/OffchainLabs/prysm/v6/testing/assert"
+	"github.com/OffchainLabs/prysm/v6/testing/require"
+	"github.com/OffchainLabs/prysm/v6/validator/client/beacon-api/mock"
 	"github.com/ethereum/go-ethereum/common/hexutil"
-	"github.com/prysmaticlabs/prysm/v5/api/server/structs"
-	"github.com/prysmaticlabs/prysm/v5/network/httputil"
-	"github.com/prysmaticlabs/prysm/v5/testing/assert"
-	"github.com/prysmaticlabs/prysm/v5/testing/require"
-	"github.com/prysmaticlabs/prysm/v5/validator/client/beacon-api/mock"
 	"go.uber.org/mock/gomock"
 	"google.golang.org/protobuf/types/known/emptypb"
 )
@@ -24,7 +24,7 @@ func TestWaitForChainStart_ValidGenesis(t *testing.T) {
 	genesisResponseJson := structs.GetGenesisResponse{}
 	jsonRestHandler := mock.NewMockJsonRestHandler(ctrl)
 	jsonRestHandler.EXPECT().Get(
-		ctx,
+		gomock.Any(),
 		"/eth/v1/beacon/genesis",
 		&genesisResponseJson,
 	).Return(
@@ -78,7 +78,7 @@ func TestWaitForChainStart_BadGenesis(t *testing.T) {
 				GenesisTime:           "1234",
 				GenesisValidatorsRoot: "0xzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz",
 			},
-			errorMessage: "invalid genesis validators root: ",
+			errorMessage: "failed to decode genesis validators root: ",
 		},
 	}
 
@@ -91,7 +91,7 @@ func TestWaitForChainStart_BadGenesis(t *testing.T) {
 			genesisResponseJson := structs.GetGenesisResponse{}
 			jsonRestHandler := mock.NewMockJsonRestHandler(ctrl)
 			jsonRestHandler.EXPECT().Get(
-				ctx,
+				gomock.Any(),
 				"/eth/v1/beacon/genesis",
 				&genesisResponseJson,
 			).Return(
@@ -119,7 +119,7 @@ func TestWaitForChainStart_JsonResponseError(t *testing.T) {
 	genesisResponseJson := structs.GetGenesisResponse{}
 	jsonRestHandler := mock.NewMockJsonRestHandler(ctrl)
 	jsonRestHandler.EXPECT().Get(
-		ctx,
+		gomock.Any(),
 		"/eth/v1/beacon/genesis",
 		&genesisResponseJson,
 	).Return(
@@ -144,7 +144,7 @@ func TestWaitForChainStart_JsonResponseError404(t *testing.T) {
 
 	// First, mock a request that receives a 404 error (which means that the genesis data is not available yet)
 	jsonRestHandler.EXPECT().Get(
-		ctx,
+		gomock.Any(),
 		"/eth/v1/beacon/genesis",
 		&genesisResponseJson,
 	).Return(
@@ -156,7 +156,7 @@ func TestWaitForChainStart_JsonResponseError404(t *testing.T) {
 
 	// After receiving a 404 error, mock a request that actually has genesis data available
 	jsonRestHandler.EXPECT().Get(
-		ctx,
+		gomock.Any(),
 		"/eth/v1/beacon/genesis",
 		&genesisResponseJson,
 	).Return(

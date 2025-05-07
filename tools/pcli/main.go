@@ -10,20 +10,20 @@ import (
 	"strings"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/core/epoch/precompute"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/core/transition"
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/state"
+	state_native "github.com/OffchainLabs/prysm/v6/beacon-chain/state/state-native"
+	"github.com/OffchainLabs/prysm/v6/config/params"
+	"github.com/OffchainLabs/prysm/v6/consensus-types/interfaces"
+	"github.com/OffchainLabs/prysm/v6/encoding/ssz/detect"
+	"github.com/OffchainLabs/prysm/v6/encoding/ssz/equality"
+	ethpb "github.com/OffchainLabs/prysm/v6/proto/prysm/v1alpha1"
+	prefixed "github.com/OffchainLabs/prysm/v6/runtime/logging/logrus-prefixed-formatter"
+	"github.com/OffchainLabs/prysm/v6/runtime/version"
 	"github.com/kr/pretty"
 	"github.com/pkg/errors"
 	fssz "github.com/prysmaticlabs/fastssz"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/epoch/precompute"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/core/transition"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	state_native "github.com/prysmaticlabs/prysm/v5/beacon-chain/state/state-native"
-	"github.com/prysmaticlabs/prysm/v5/config/params"
-	"github.com/prysmaticlabs/prysm/v5/consensus-types/interfaces"
-	"github.com/prysmaticlabs/prysm/v5/encoding/ssz/detect"
-	"github.com/prysmaticlabs/prysm/v5/encoding/ssz/equality"
-	ethpb "github.com/prysmaticlabs/prysm/v5/proto/prysm/v1alpha1"
-	prefixed "github.com/prysmaticlabs/prysm/v5/runtime/logging/logrus-prefixed-formatter"
-	"github.com/prysmaticlabs/prysm/v5/runtime/version"
 	log "github.com/sirupsen/logrus"
 	"github.com/urfave/cli/v2"
 	"gopkg.in/d4l3k/messagediff.v1"
@@ -209,20 +209,16 @@ var stateTransitionCommand = &cli.Command{
 	Action: func(c *cli.Context) error {
 		if network != "" {
 			switch network {
-			case params.PraterName:
-				if err := params.SetActive(params.PraterConfig()); err != nil {
-					log.Fatal(err)
-				}
-			case params.GoerliName:
-				if err := params.SetActive(params.PraterConfig()); err != nil {
-					log.Fatal(err)
-				}
 			case params.SepoliaName:
 				if err := params.SetActive(params.SepoliaConfig()); err != nil {
 					log.Fatal(err)
 				}
 			case params.HoleskyName:
 				if err := params.SetActive(params.HoleskyConfig()); err != nil {
+					log.Fatal(err)
+				}
+			case params.HoodiName:
+				if err := params.SetActive(params.HoodiConfig()); err != nil {
 					log.Fatal(err)
 				}
 			default:
@@ -307,7 +303,7 @@ var stateTransitionCommand = &cli.Command{
 
 func main() {
 	customFormatter := new(prefixed.TextFormatter)
-	customFormatter.TimestampFormat = "2006-01-02 15:04:05"
+	customFormatter.TimestampFormat = time.DateTime
 	customFormatter.FullTimestamp = true
 	log.SetFormatter(customFormatter)
 	app := cli.App{}

@@ -6,12 +6,12 @@ import (
 	"sync"
 	"time"
 
+	"github.com/OffchainLabs/prysm/v6/beacon-chain/state"
+	lruwrpr "github.com/OffchainLabs/prysm/v6/cache/lru"
+	"github.com/OffchainLabs/prysm/v6/monitoring/tracing/trace"
 	lru "github.com/hashicorp/golang-lru"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promauto"
-	"github.com/prysmaticlabs/prysm/v5/beacon-chain/state"
-	lruwrpr "github.com/prysmaticlabs/prysm/v5/cache/lru"
-	"go.opencensus.io/trace"
 )
 
 var (
@@ -92,17 +92,17 @@ func (c *SkipSlotCache) Get(ctx context.Context, r [32]byte) (state.BeaconState,
 		delay *= delayFactor
 		delay = math.Min(delay, maxDelay)
 	}
-	span.AddAttributes(trace.BoolAttribute("inProgress", inProgress))
+	span.SetAttributes(trace.BoolAttribute("inProgress", inProgress))
 
 	item, exists := c.cache.Get(r)
 
 	if exists && item != nil {
 		skipSlotCacheHit.Inc()
-		span.AddAttributes(trace.BoolAttribute("hit", true))
+		span.SetAttributes(trace.BoolAttribute("hit", true))
 		return item.(state.BeaconState).Copy(), nil
 	}
 	skipSlotCacheMiss.Inc()
-	span.AddAttributes(trace.BoolAttribute("hit", false))
+	span.SetAttributes(trace.BoolAttribute("hit", false))
 	return nil, nil
 }
 
